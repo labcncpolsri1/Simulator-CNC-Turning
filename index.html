@@ -296,7 +296,7 @@
       return out;
     }
 
-    var lines = $('prog').value.split('\n'), lab = {}, skipFrom = -1, skipTo = -1, g71p = null, g76p = null, g75p = null, g74p = null, threads = [];
+    var lines = $('prog').value.replace(/[\u2028\u2029]/g, '\n').replace(/[\u200b-\u200f\u2060\ufeff]/g, '').normalize('NFKC').split(/\r?\n/), lab = {}, skipFrom = -1, skipTo = -1, g71p = null, g76p = null, g75p = null, g74p = null, threads = [];
     lines.forEach(function (r, i) { var m = /^\s*(?:\d+\s+)?N\s*(\d+)/i.exec(r); if (m) { var kN = parseInt(m[1], 10); (lab[kN] = lab[kN] || []).push(i); } });
     function addTime(len, x) { var rr = rpmAt(x); if (feed > 0) { if (fmode === 99 && rr > 0) time += len / (feed * rr); else if (fmode === 98) time += len / feed; } }
     function cutSeg(seg, x0, z0) {
@@ -567,7 +567,8 @@
         } else {
           var P = Math.round(v.P), Qn = Math.round(v.Q), A = { x: pos.x, z: pos.z };
           var segs = (isFinite(P) && isFinite(Qn)) ? readProfile(P, Qn, A, li) : null;
-          if (!segs || !segs.length) W('bad', 'Profil N' + v.P + ' sampai N' + v.Q + ' tidak ditemukan atau kosong. Cek nomor blok P dan Q.');
+          if (!segs || !segs.length) { var lk = Object.keys(lab).map(function (k) { return 'N' + k + ' (baris ' + lab[k].map(function (x) { return x + 1; }).join(', ') + ')'; }).join('; ');
+            W('bad', 'Profil N' + v.P + ' sampai N' + v.Q + ' tidak ditemukan atau kosong. Cek nomor blok P dan Q. Label yang terbaca di program: ' + (lk || 'tidak ada') + '.'); }
           else {
             var mv = mover(W);
             if (curType === 'ulir') W('warn', 'Pahat ulir dipakai untuk pembubutan biasa. Pakai pahat rata atau finishing.');
