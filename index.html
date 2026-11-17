@@ -297,7 +297,7 @@
     }
 
     var lines = $('prog').value.split('\n'), lab = {}, skipFrom = -1, skipTo = -1, g71p = null, g76p = null, g75p = null, g74p = null, threads = [];
-    lines.forEach(function (r, i) { var m = /^\s*N(\d+)/i.exec(r); if (m) lab[parseInt(m[1], 10)] = i; });
+    lines.forEach(function (r, i) { var m = /^\s*(?:\d+\s+)?N\s*(\d+)/i.exec(r); if (m) { var kN = parseInt(m[1], 10); (lab[kN] = lab[kN] || []).push(i); } });
     function addTime(len, x) { var rr = rpmAt(x); if (feed > 0) { if (fmode === 99 && rr > 0) time += len / (feed * rr); else if (fmode === 98) time += len / feed; } }
     function cutSeg(seg, x0, z0) {
       var len = 0, px = x0, pz = z0, base = pts.length;
@@ -342,12 +342,21 @@
         }
       });
     }
-    function readProfile(P, Q, A) {
-      var i0 = lab[P], i1 = lab[Q];
-      if (i0 === undefined || i1 === undefined || i1 < i0) return null;
+    var profRange = null;
+    function readProfile(P, Q, A, fromLi) {
+      var lp = lab[P], lq = lab[Q], i0, i1, k;
+      profRange = null;
+      if (!lp || !lq) return null;
+      for (k = 0; k < lp.length; k++) if (lp[k] > fromLi) { i0 = lp[k]; break; }
+      if (i0 === undefined) i0 = lp[lp.length - 1];
+      for (k = 0; k < lq.length; k++) if (lq[k] >= i0) { i1 = lq[k]; break; }
+      if (i1 === undefined) return null;
+      // Jika N-P muncul dua kali berurutan (N100 sendiri di satu baris lalu N100 lagi di baris berikutnya), pakai yang terakhir dari deretan itu.
+      for (k = 0; k < lp.length; k++) if (lp[k] > i0 && lp[k] <= i1 && lp[k] < i1) { i0 = lp[k]; }
+      profRange = [i0, i1];
       var segs = [], x = A.x, z = A.z, mg = 0, i;
       for (i = i0; i <= i1; i++) {
-        var tt = lines[i].replace(/\([^)]*\)/g, '').replace(/;.*$/, '').replace(/^\s*N\d+\s*/i, '').toUpperCase().trim();
+        var tt = lines[i].replace(/\([^)]*\)/g, '').replace(/;.*$/, '').replace(/^\s*(?:\d+\s+)?N\s*\d+\s*/i, '').toUpperCase().trim();
         if (!tt) continue;
         var vv = {}, gg = [], m2, r2 = /([A-Z])\s*(-?\d*\.?\d+)(\.?)/g;
         while ((m2 = r2.exec(tt))) { var q2 = addrVal(m2[1], m2[2], m2[3]); if (m2[1] === 'G') gg.push(Math.round(q2)); else vv[m2[1]] = q2; }
@@ -412,7 +421,7 @@
       return passes;
     }
     lines.forEach(function (raw, li) {
-      var t = raw.replace(/\([^)]*\)/g, '').replace(/;.*$/, '').replace(/^\s*N\d+\s*/i, '').toUpperCase().trim();
+      var t = raw.replace(/\([^)]*\)/g, '').replace(/;.*$/, '').replace(/^\s*(?:\d+\s+)?N\s*\d+\s*/i, '').toUpperCase().trim();
       if (!t) return;
       var b = { line: li + 1, raw: raw.trim(), exp: [], warns: [], s: pts.length - 1, e: 0 }; g33 = false;
       // Tanpa titik desimal pada X Z U W R I K: simulator membaca 1/100 (X5 = 0.05 mm), X5. = 5 mm. Nilai nol (X0, Z0, X0.) aman: tetap 0, tanpa peringatan.
@@ -557,7 +566,7 @@
           b.exp.push('G71 (baris pertama): kedalaman potong ' + v.U + ' mm per lintasan (radius), retract ' + v.R + ' mm.');
         } else {
           var P = Math.round(v.P), Qn = Math.round(v.Q), A = { x: pos.x, z: pos.z };
-          var segs = (isFinite(P) && isFinite(Qn)) ? readProfile(P, Qn, A) : null;
+          var segs = (isFinite(P) && isFinite(Qn)) ? readProfile(P, Qn, A, li) : null;
           if (!segs || !segs.length) W('bad', 'Profil N' + v.P + ' sampai N' + v.Q + ' tidak ditemukan atau kosong. Cek nomor blok P dan Q.');
           else {
             var mv = mover(W);
@@ -567,10 +576,9 @@
               if (!g71p) W('warn', 'Baris G71 pertama (U dan R) belum diprogram. Simulator memakai kedalaman potong 1 mm dan retract 0,5 mm.');
               var d71 = gp.d > 0.01 ? gp.d : 1, r71 = gp.r >= 0 ? gp.r : 0.5;
               poly.forEach(function (q, k) { if (k && q.x < poly[k - 1].x - 1e-6) mono = false; });
-              if (!mono) W('warn', 'Profil punya bagian yang menyempit menuju cekam (X mengecil). G71 sederhana tidak bisa mengerjakannya, hasil simulasi bisa tidak sesuai.');
               var np = rough71(mv, A, poly, d71, r71, v.U || 0, v.W || 0);
               b.exp.push('G71: pengasaran memanjang untuk profil N' + P + ' sampai N' + Qn + ', ' + np + ' lintasan, sisa finishing X' + (v.U || 0) + ' Z' + (v.W || 0) + '. Pahat kembali ke titik awal X' + A.x + ' Z' + A.z + '.');
-              skipFrom = lab[P]; skipTo = lab[Qn];
+              skipFrom = profRange[0]; skipTo = profRange[1];
             } else {
               segs.forEach(function (sg) {
                 if (sg.g === 2 || sg.g === 3) mv.emit(addArc(pos.x, pos.z, sg.x1, sg.z1, sg.g === 2, sg.v), 'f', sg.x1, sg.z1);
